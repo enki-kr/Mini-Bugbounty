@@ -1,0 +1,13 @@
+diff --git a/src/builtins/array-splice.tq b/src/builtins/array-splice.tq
+index c8a4010d1a..6f091627f6 100644
+--- a/src/builtins/array-splice.tq
++++ b/src/builtins/array-splice.tq
+@@ -186,7 +186,7 @@ transitioning macro FastArraySplice(
+ 
+   // Make sure that the length hasn't been changed by side-effect.
+   const length: Smi = Cast<Smi>(a.length) otherwise Bailout;
+-  if (originalLength != length) goto Bailout;
++  // if (originalLength != length) goto Bailout;
+ 
+   const deletedResult: JSArray =
+       ExtractFastJSArray(context, a, actualStart, actualDeleteCount);

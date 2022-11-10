@@ -1,0 +1,45 @@
+// In https://github.com/mozilla/gecko-dev 
+--- a/js/src/frontend/BytecodeEmitter.cpp
++++ b/js/src/frontend/BytecodeEmitter.cpp
+@@ -2340,7 +2340,6 @@
+ 
+   MOZ_ASSERT(inPrologue());
+ 
+-  TDZCheckCache tdzCache(this);
+   EmitterScope emitterScope(this);
+   Maybe<AsyncEmitter> topLevelAwait;
+   if (sc->isGlobalContext()) {
+@@ -4365,7 +4364,6 @@
+ }
+ 
+ bool BytecodeEmitter::emitShortCircuitAssignment(AssignmentNode* node) {
+-  TDZCheckCache tdzCache(this);
+ 
+   JSOp op;
+   switch (node->getKind()) {
+@@ -8514,18 +8512,6 @@
+              node->isKind(ParseNodeKind::CoalesceExpr) ||
+              node->isKind(ParseNodeKind::AndExpr));
+ 
+-  /*
+-   * JSOp::Or converts the operand on the stack to boolean, leaves the original
+-   * value on the stack and jumps if true; otherwise it falls into the next
+-   * bytecode, which pops the left operand and then evaluates the right operand.
+-   * The jump goes around the right operand evaluation.
+-   *
+-   * JSOp::And converts the operand on the stack to boolean and jumps if false;
+-   * otherwise it falls into the right operand's bytecode.
+-   */
+-
+-  TDZCheckCache tdzCache(this);
+-
+   JSOp op;
+   switch (node->getKind()) {
+     case ParseNodeKind::OrExpr:
+@@ -11772,4 +11758,4 @@
+ void BytecodeEmitter::dumpAtom(TaggedParserAtomIndex index) const {
+   parserAtoms().dump(index);
+ }
+-#endif
+\ No newline at end of file
++#endif

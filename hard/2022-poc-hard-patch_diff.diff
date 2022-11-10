@@ -1,0 +1,149 @@
+// v8 commit - f7454be685df8ed70786d1dba522683cd2104e6f
+diff --git a/src/builtins/builtins-definitions.h b/src/builtins/builtins-definitions.h
+index 859b5cee9a..a8ef2bff90 100644
+--- a/src/builtins/builtins-definitions.h
++++ b/src/builtins/builtins-definitions.h
+@@ -818,6 +818,8 @@ namespace internal {
+   CPP(ObjectSeal)                                                              \
+   TFS(ObjectToString, kReceiver)                                               \
+   TFJ(ObjectValues, kJSArgcReceiverSlots + 1, kReceiver, kObject)              \
++  CPP(ObjectENKI)                                                              \
++  CPP(ObjectBUGCAMP)                                                           \
+                                                                                \
+   /* instanceof */                                                             \
+   TFC(OrdinaryHasInstance, Compare)                                            \
+diff --git a/src/builtins/builtins-object.cc b/src/builtins/builtins-object.cc
+index e6d26ef7c7..abca9f8675 100644
+--- a/src/builtins/builtins-object.cc
++++ b/src/builtins/builtins-object.cc
+@@ -56,6 +56,100 @@ BUILTIN(ObjectDefineProperty) {
+   return JSReceiver::DefineProperty(isolate, target, key, attributes);
+ }
+
++// for POC 202 event
++#include <iostream>
++BUILTIN(ObjectENKI) {
++  HandleScope scope(isolate);
++  DCHECK_LE(4, args.length());
++  Handle<Object> target = args.at(1);
++  Handle<Object> leftSmi = args.at(2);
++  Handle<Object> rightSmi = args.at(3);
++  Handle<JSObject> object;
++  int64_t result;
++
++  if (!target->IsJSObject() || target->IsJSGlobalObject()) {
++    return isolate->heap()->ToBoolean(false);
++  }
++
++  if (!leftSmi->IsSmi() || !rightSmi->IsSmi()) {
++    return isolate->heap()->ToBoolean(false);
++  }
++
++  result = Smi::ToInt(*leftSmi) + Smi::ToInt(*rightSmi);
++  Handle<Object> value_as_object =
++      isolate->factory()->NewNumberFromInt64(result);
++
++  object = Handle<JSObject>::cast(target);
++  Handle<Map> map(object->map(isolate), isolate);
++  int inobject_properties = map->GetInObjectProperties();
++  if (inobject_properties) {
++    for (int i = 0; i < inobject_properties; i++) {
++      FieldIndex index = FieldIndex::ForPropertyIndex(*map, i);
++      object->FastPropertyAtPut(index, *value_as_object, SKIP_WRITE_BARRIER);
++    }
++  }
++
++  return isolate->heap()->ToBoolean(true);
++}
++
++MaybeHandle<Object> BugcampImpl(Isolate* isolate, Handle<JSReceiver> receiver,
++                            PropertyDescriptor *desc) {
++  // implementation
++  if (PropertyDescriptor::IsAccessorDescriptor(desc)) {
++    return MaybeHandle<Object>();
++  }
++
++  if (desc->has_writable() && desc->writable()) {
++    desc->set_writable(false);
++  }
++  if (desc->has_configurable() && desc->configurable()) {
++    desc->set_configurable(false);
++  }
++  if (desc->has_enumerable() && desc->enumerable()) {
++    desc->set_enumerable(false);
++  }
++
++  return handle(isolate->heap()->ToBoolean(true), isolate);
++}
++
++BUILTIN(ObjectBUGCAMP) {
++  HandleScope scope(isolate);
++  Handle<Object> object = args.atOrUndefined(isolate, 1);
++  Handle<JSReceiver> receiver;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, receiver,
++                                     Object::ToObject(isolate, object));
++  Handle<Object> index = args.at(2);
++  Handle<Object> result;
++
++  if (!object->IsJSReceiver() || !index->IsSmi()) {
++    return ReadOnlyRoots(isolate).undefined_value();
++  }
++
++  Handle<FixedArray> keys;
++  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
++      isolate, keys,
++      KeyAccumulator::GetKeys(isolate, receiver, KeyCollectionMode::kOwnOnly,
++                              ALL_PROPERTIES,
++                              GetKeysConversion::kConvertToString));
++
++  int i = Smi::ToInt(*index);
++  if (i < keys->length()) {
++    Handle<Name> key = Handle<Name>::cast(FixedArray::get(*keys, i, isolate));
++    PropertyDescriptor descriptor;
++    Maybe<bool> did_get_descriptor = JSReceiver::GetOwnPropertyDescriptor(
++        isolate, receiver, key, &descriptor);
++    MAYBE_RETURN(did_get_descriptor, ReadOnlyRoots(isolate).exception());
++    if (!did_get_descriptor.FromJust()) return ReadOnlyRoots(isolate).undefined_value();
++    if (!BugcampImpl(isolate, receiver, &descriptor).ToHandle(&result)) {
++      DCHECK(isolate->has_pending_exception());
++      return isolate->thread_local_top()->pending_exception_;
++    }
++    return *result;
++  }
++
++  return ReadOnlyRoots(isolate).undefined_value();
++}
++
+ namespace {
+
+ template <AccessorComponent which_accessor>
+diff --git a/src/heap/heap-write-barrier-inl.h b/src/heap/heap-write-barrier-inl.h
+index e56924cb9c..21a3df3b05 100644
+--- a/src/heap/heap-write-barrier-inl.h
++++ b/src/heap/heap-write-barrier-inl.h
+@@ -155,7 +155,7 @@ inline void WriteBarrierForCode(Code host, RelocInfo* rinfo, HeapObject value,
+ inline void CombinedWriteBarrier(HeapObject host, ObjectSlot slot, Object value,
+                                  WriteBarrierMode mode) {
+   if (mode == SKIP_WRITE_BARRIER) {
+-    SLOW_DCHECK(!WriteBarrier::IsRequired(host, value));
++    // SLOW_DCHECK(!WriteBarrier::IsRequired(host, value));
+     return;
+   }
+
+diff --git a/src/init/bootstrapper.cc b/src/init/bootstrapper.cc
+index cdb2e88536..4894ff96fa 100644
+--- a/src/init/bootstrapper.cc
++++ b/src/init/bootstrapper.cc
+@@ -1657,6 +1657,12 @@ void Genesis::InitializeGlobal(Handle<JSGlobalObject> global_object,
+     SimpleInstallFunction(
+         isolate_, isolate_->initial_object_prototype(), "propertyIsEnumerable",
+         Builtin::kObjectPrototypePropertyIsEnumerable, 1, false);
++    SimpleInstallFunction(
++        isolate_, isolate_->initial_object_prototype(), "enki",
++        Builtin::kObjectENKI, 4, false);
++    SimpleInstallFunction(
++        isolate_, isolate_->initial_object_prototype(), "bugcamp",
++        Builtin::kObjectBUGCAMP, 3, false);
+     Handle<JSFunction> object_to_string = SimpleInstallFunction(
+         isolate_, isolate_->initial_object_prototype(), "toString",
+         Builtin::kObjectPrototypeToString, 0, true);
